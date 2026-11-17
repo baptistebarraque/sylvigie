@@ -1,0 +1,27 @@
+# Pilot zone: a window inside the Parc naturel régional du Morvan.
+
+name: morvan
+crs: EPSG:32631 # UTM zone 31N, native CRS of the Sentinel-2 tiles over the Morvan
+resolution: 10 # metres
+
+sufosat:
+  # SUFOSAT v3.0.1 clear-cut dates (YYDDD per 10 m pixel), Zenodo record 17253008.
+  url: https://zenodo.org/api/records/17253008/files/forest-clearcuts_mainland-france_sufosat_dates_v3_set25.tif/content
+  filename: forest-clearcuts_mainland-france_sufosat_dates_v3_set25.tif
+  md5: 7691d5d7ad104f713bf1292282228935
+
+pnr:
+  id_mnhn: FR8000025 # PNR du Morvan in the PatriNat layer of the IGN Géoplateforme
+
+selection:
+  years: [2023, 2024] # calibration year, then test year
+  window_km: 25
+  step_km: 1
+  min_cuts_per_year: 100 # clear-cut objects per year inside the window
+  min_object_ha: 0.5 # smallest clear-cut counted; matches our minimum mapping unit
+  min_pnr_fraction: 0.75
+  max_overlap: 0.5 # candidates may share at most half their area
+  n_candidates: 3
+
+# Pilot window, filled in once a candidate is chosen: [xmin, ymin, xmax, ymax] in `crs`.
+bbox: null
