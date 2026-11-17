@@ -1,0 +1,50 @@
+[project]
+name = "sylvigie"
+version = "0.1.0"
+description = "Satellite monitoring of French forests: clear-cut and dieback detection from Sentinel-1/2 time series."
+readme = "README.md"
+authors = [
+    { name = "baptistebarraque", email = "baptiste.barraque@student-cs.fr" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "dask[array]>=2026.8.0",
+    "geopandas>=1.2.0",
+    "matplotlib>=3.11.2",
+    "odc-stac>=0.5.3",
+    "planetary-computer>=1.0.0",
+    "pydantic>=2.14.3",
+    "pystac-client>=0.9.1",
+    "pyyaml>=6.0.3",
+    "rasterio>=1.5.2",
+    "rioxarray>=0.24.0",
+    "shapely>=2.2.0",
+    "typer>=0.29.1",
+    "xarray>=2026.9.0",
+    "zarr>=3.4.2",
+]
+
+[project.scripts]
+sylvigie = "sylvigie.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: import sorting, UP: modern syntax,
+# B: likely bugs (bugbear), NPY: NumPy-specific deprecations and pitfalls.
+select = ["E", "W", "F", "I", "UP", "B", "NPY"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]

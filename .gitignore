@@ -1,0 +1,22 @@
+# Data: never committed, always reproducible from a CLI command and a config
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Local secrets and editor files
+.env
+.vscode/
+.idea/
