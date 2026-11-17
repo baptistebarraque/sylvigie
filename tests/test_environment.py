@@ -34,9 +34,9 @@ def test_core_module_imports(module):
 def test_rasterio_can_write_geotiff():
     import rasterio
 
-    # GTiff carries the reference grid, forest mask and label rasters.
+    # GTiff/COG carry the reference grid, forest mask and label rasters.
     with rasterio.Env() as env:
-        assert "GTiff" in env.drivers()
+        assert {"GTiff", "COG"} <= set(env.drivers())
 
 
 def test_pyogrio_can_write_geopackage():
