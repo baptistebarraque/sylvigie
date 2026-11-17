@@ -23,5 +23,10 @@ selection:
   max_overlap: 0.5 # candidates may share at most half their area
   n_candidates: 3
 
-# Pilot window, filled in once a candidate is chosen: [xmin, ymin, xmax, ymax] in `crs`.
-bbox: null
+# Pilot windows chosen from `sylvigie suggest-zone` (2026-11-17), as
+# [xmin, ymin, xmax, ymax] in `crs`. They do not overlap (3 km apart).
+windows:
+  # D1, densest window: thresholds and models are developed and tuned here.
+  dev: [569000, 5205000, 594000, 5230000]
+  # R1, closest to the whole park: headline metrics are measured here.
+  eval: [564000, 5233000, 589000, 5258000]

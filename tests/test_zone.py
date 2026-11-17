@@ -16,6 +16,7 @@ from sylvigie.zone import (
     find_cut_objects,
     pick_distinct,
     rank_windows,
+    shortlist,
     sufosat_years,
     window_bounds,
     window_overlap,
@@ -185,6 +186,22 @@ def test_cut_polygons_keeps_large_patches_inside_bounds():
     assert cuts["area_ha"].tolist() == pytest.approx([1.0, 1.0])
     assert cuts.crs.to_epsg() == 32631
     assert cuts.geometry.iloc[0].bounds == (100.0, 800.0, 200.0, 900.0)
+
+
+def test_shortlist_has_representative_and_densest_windows():
+    years_px, forest, park, cell = _synthetic_park()
+    stats = compute_cell_stats(years_px, forest, park, [2023, 2024], cell, 1)
+    profile = area_profile(years_px, forest, park, [2023, 2024])
+    ranked = rank_windows(stats, [2023, 2024], 4, profile, 0, 0.5, 0.01)
+
+    short = shortlist(ranked, 4, max_overlap=0.5, n=2)
+
+    assert list(short["candidate"]) == ["R1", "R2", "D1", "D2"]
+    representative = short[short["kind"] == "representative"]
+    densest = short[short["kind"] == "densest"]
+    assert (representative["col"] == 2).all()  # half dense, half empty: like the park
+    assert (densest["col"] == 0).all()  # fully inside the dense half
+    assert (densest["total_cuts"] == 32).all()
 
 
 def test_window_bounds():

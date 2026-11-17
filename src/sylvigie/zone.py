@@ -227,6 +227,7 @@ def rank_windows(
         "pnr_fraction": pnr_fraction[rows, cols],
         "score": score[rows, cols],
     }
+    table["total_cuts"] = sum(table[f"cuts_{y}"] for y in years)
     return pd.DataFrame(table).sort_values("score", ignore_index=True)
 
 
@@ -251,6 +252,35 @@ def pick_distinct(
             if len(chosen) == n:
                 break
     return ranked.loc[chosen].reset_index(drop=True)
+
+
+# Two shortlists: (id prefix, sort column, ascending).
+#  - representative: closest to the park profile, where headline metrics are
+#    measured because they transfer to the rest of the territory;
+#  - densest: most clear-cuts, where thresholds and models are developed
+#    because examples are plentiful.
+SHORTLISTS = {
+    "representative": ("R", "score", True),
+    "densest": ("D", "total_cuts", False),
+}
+
+
+def shortlist(
+    ranked: pd.DataFrame, window_cells: int, max_overlap: float, n: int
+) -> pd.DataFrame:
+    """Top `n` distinct windows of each shortlist, ids R1.. and D1.."""
+    parts = []
+    for kind, (prefix, column, ascending) in SHORTLISTS.items():
+        order = ranked.sort_values(
+            column, ascending=ascending, kind="stable", ignore_index=True
+        )
+        picked = pick_distinct(order, window_cells, max_overlap, n)
+        picked.insert(
+            0, "candidate", [f"{prefix}{i}" for i in range(1, len(picked) + 1)]
+        )
+        picked.insert(1, "kind", kind)
+        parts.append(picked)
+    return pd.concat(parts, ignore_index=True)
 
 
 def window_bounds(
@@ -398,8 +428,7 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
         sel.min_pnr_fraction,
         pixel_ha,
     )
-    picked = pick_distinct(ranked, window_cells, sel.max_overlap, sel.n_candidates)
-    picked.insert(0, "candidate", np.arange(1, len(picked) + 1))
+    picked = shortlist(ranked, window_cells, sel.max_overlap, sel.n_candidates)
     geometries = [
         box(*window_bounds(grid, r, c, window_cells, cell_px))
         for r, c in zip(picked["row"], picked["col"], strict=True)

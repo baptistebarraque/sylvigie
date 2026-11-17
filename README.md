@@ -32,15 +32,20 @@ uv sync
 uv run sylvigie --help
 ```
 
-Pick a pilot window (roadmap step 2a): download SUFOSAT and the park
-boundary, rank candidate windows and write a review map and table under
+Pick the pilot windows (roadmap step 2a): download SUFOSAT, the park
+boundary and BD Forêt, then shortlist candidate windows and write review
+maps (PNG and interactive HTML over IGN orthophotos) under
 `data/processed/<zone>/zone/`:
 
 ```sh
 uv run sylvigie suggest-zone --config configs/morvan.yaml
 ```
 
-Copy the chosen candidate's bbox into the config's `bbox` field.
+Two shortlists come out: **representative** windows (R1, R2, ...), closest
+to the whole park in cut rate and conifer share, and **densest** windows
+(D1, D2, ...). Copy the chosen bboxes into the config's `windows` field:
+`dev` (where thresholds and models are tuned) and `eval` (where headline
+metrics are measured). For the Morvan, `dev` = D1 and `eval` = R1.
 
 ## Development
 

@@ -12,7 +12,12 @@ UTM = "EPSG:32631"
 def test_write_zone_webmap_embeds_layers(tmp_path):
     park = gpd.GeoDataFrame(geometry=[box(600000, 5200000, 650000, 5260000)], crs=UTM)
     candidates = gpd.GeoDataFrame(
-        {"candidate": [1], "cuts_2023": [120], "note": ["</script>"]},
+        {
+            "candidate": ["R1"],
+            "kind": ["representative"],
+            "cuts_2023": [120],
+            "note": ["</script>"],
+        },
         geometry=[box(610000, 5210000, 635000, 5235000)],
         crs=UTM,
     )

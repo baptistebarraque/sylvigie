@@ -69,7 +69,10 @@ const park = L.geoJSON(DATA.park, {
 
 const fmt = (v, d = 0) => Number(v).toLocaleString("en", { maximumFractionDigits: d });
 const windows = L.geoJSON(DATA.candidates, {
-  style: { color: "#ffffff", weight: 3, fill: false },
+  style: f => ({
+    color: "#ffffff", weight: 3, fill: false,
+    dashArray: f.properties.kind === "densest" ? "10 6" : null,
+  }),
   onEachFeature: (f, layer) => {
     const p = f.properties;
     const rows = DATA.years.map(y =>
@@ -77,7 +80,7 @@ const windows = L.geoJSON(DATA.candidates, {
       `<td>${p["cuts_" + y]} (${fmt(p["cut_ha_" + y])} ha)</td></tr>`
     ).join("");
     layer.bindPopup(
-      `<b>Candidate ${p.candidate}</b><table class="stats">${rows}` +
+      `<b>Candidate ${p.candidate}</b> (${p.kind})<table class="stats">${rows}` +
       `<tr><td>Cut rate</td><td>${fmt(p.cut_rate_pct, 2)} %/yr</td></tr>` +
       `<tr><td>Conifer share</td><td>${fmt(100 * p.conifer_share)} %</td></tr>` +
       `<tr><td>In park</td><td>${fmt(100 * p.pnr_fraction)} %</td></tr>` +
@@ -114,7 +117,9 @@ info.onAdd = () => {
   const div = L.DomUtil.create("div", "panel");
   div.innerHTML = `<h1>${DATA.title}</h1>` + legend +
     `<div><span class="swatch" style="border-color:#fff;background:#0004"></span>` +
-    `Candidate window (click for stats)</div>` +
+    `R: representative window (click for stats)</div>` +
+    `<div><span class="swatch" style="border-color:#fff;border-style:dashed;` +
+    `background:#0004"></span>D: densest window</div>` +
     `<div class="muted">Yearly Express orthos may be blank where not yet flown.</div>`;
   return div;
 };

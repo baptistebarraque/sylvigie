@@ -26,6 +26,9 @@ SEQUENTIAL_BLUE = [
     "#0d366b",
 ]
 
+# Window outline by shortlist; identity also carried by the R/D label.
+WINDOW_LINESTYLES = {"representative": "-", "densest": "--"}
+
 _km = FuncFormatter(lambda v, _: f"{v / 1000:.0f}")
 
 
@@ -58,7 +61,15 @@ def plot_zone_candidates(
     for row in candidates.itertuples():
         x0, y0, x1, y1 = row.geometry.bounds
         ax.add_patch(
-            Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, ec=TEXT_PRIMARY, lw=2)
+            Rectangle(
+                (x0, y0),
+                x1 - x0,
+                y1 - y0,
+                fill=False,
+                ec=TEXT_PRIMARY,
+                lw=2,
+                ls=WINDOW_LINESTYLES.get(row.kind, "-"),
+            )
         )
         ax.text(
             x0 + 800,
@@ -86,7 +97,11 @@ def plot_zone_candidates(
     ax.legend(
         handles=[
             Line2D([], [], color=TEXT_SECONDARY, lw=1.2, label="Park boundary"),
-            Line2D([], [], color=TEXT_PRIMARY, lw=2, label="Candidate window"),
+            *[
+                Line2D([], [], color=TEXT_PRIMARY, lw=2, ls=ls, label=f"{kind} window")
+                for kind, ls in WINDOW_LINESTYLES.items()
+                if kind in set(candidates["kind"])
+            ],
         ],
         loc="lower left",
         frameon=False,

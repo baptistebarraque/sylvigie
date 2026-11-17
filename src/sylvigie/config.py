@@ -38,6 +38,36 @@ class SelectionParams(_Frozen):
         return self
 
 
+Bbox = tuple[float, float, float, float]  # xmin, ymin, xmax, ymax
+
+
+def _check_bbox(name: str, bbox: Bbox) -> None:
+    xmin, ymin, xmax, ymax = bbox
+    if xmin >= xmax or ymin >= ymax:
+        raise ValueError(f"windows.{name} must be [xmin, ymin, xmax, ymax]")
+
+
+class Windows(_Frozen):
+    """Pilot windows, in the zone CRS.
+
+    `dev` is where thresholds and models are developed and tuned; `eval` is
+    where headline metrics are measured. They must not overlap, otherwise
+    tuning would leak into the evaluation area.
+    """
+
+    dev: Bbox
+    eval: Bbox
+
+    @model_validator(mode="after")
+    def _ordered_and_disjoint(self) -> "Windows":
+        _check_bbox("dev", self.dev)
+        _check_bbox("eval", self.eval)
+        a, b = self.dev, self.eval
+        if a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]:
+            raise ValueError("windows.dev and windows.eval must not overlap")
+        return self
+
+
 class ZoneConfig(_Frozen):
     name: str
     crs: str
@@ -45,14 +75,16 @@ class ZoneConfig(_Frozen):
     sufosat: SufosatSource
     pnr: PnrSource
     selection: SelectionParams
-    bbox: tuple[float, float, float, float] | None = None
+    windows: Windows | None = None  # filled in once the windows are chosen
 
     @model_validator(mode="after")
-    def _bbox_is_ordered(self) -> "ZoneConfig":
-        if self.bbox is not None:
-            xmin, ymin, xmax, ymax = self.bbox
-            if xmin >= xmax or ymin >= ymax:
-                raise ValueError("bbox must be [xmin, ymin, xmax, ymax]")
+    def _windows_on_pixel_grid(self) -> "ZoneConfig":
+        if self.windows is not None:
+            for name, bbox in self.windows:
+                if any(v % self.resolution for v in bbox):
+                    raise ValueError(
+                        f"windows.{name} corners must be multiples of resolution"
+                    )
         return self
 
     @model_validator(mode="after")
