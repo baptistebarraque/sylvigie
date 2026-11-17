@@ -61,6 +61,26 @@ class Grid:
             ymax,
         )
 
+    def crop(
+        self, bounds: tuple[float, float, float, float]
+    ) -> tuple[tuple[slice, slice], "Grid"]:
+        """Array slices and sub-grid for the pixels covering `bounds`."""
+        xmin, _, _, ymax = self.bounds
+        res = self.resolution
+        col0 = max(0, math.floor((bounds[0] - xmin) / res))
+        col1 = min(self.width, math.ceil((bounds[2] - xmin) / res))
+        row0 = max(0, math.floor((ymax - bounds[3]) / res))
+        row1 = min(self.height, math.ceil((ymax - bounds[1]) / res))
+        if col0 >= col1 or row0 >= row1:
+            raise ValueError("bounds do not overlap the grid")
+        sub = Grid(
+            crs=self.crs,
+            transform=self.transform @ Affine.translation(col0, row0),
+            width=col1 - col0,
+            height=row1 - row0,
+        )
+        return (slice(row0, row1), slice(col0, col1)), sub
+
     def coarsen(self, factor: int) -> "Grid":
         """Grid of `factor` x `factor` pixel blocks; the shape must divide evenly."""
         if self.width % factor or self.height % factor:

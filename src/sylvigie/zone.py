@@ -16,9 +16,10 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from rasterio import features
 from rasterio.warp import transform_bounds
 from scipy import ndimage
-from shapely.geometry import box
+from shapely.geometry import box, shape
 
 from sylvigie.aoi import Grid
 from sylvigie.config import ZoneConfig
@@ -290,6 +291,34 @@ def s2_coverage(candidates: gpd.GeoDataFrame, period: str) -> pd.DataFrame:
     return pd.DataFrame(rows, index=candidates.index)
 
 
+def cut_polygons(
+    years_px: np.ndarray,
+    grid: Grid,
+    years: list[int],
+    min_area_ha: float,
+    bounds: tuple[float, float, float, float],
+) -> gpd.GeoDataFrame:
+    """Clear-cut patches inside `bounds` as polygons, one row per patch and year.
+
+    Same 8-connectivity and size threshold as the object counts, so the map
+    shows exactly the clear-cuts that were counted.
+    """
+    (rows, cols), sub = grid.crop(bounds)
+    records = []
+    for year in years:
+        mask = years_px[rows, cols] == year
+        for geom, _ in features.shapes(
+            mask.astype(np.uint8), mask=mask, transform=sub.transform, connectivity=8
+        ):
+            polygon = shape(geom)
+            area_ha = polygon.area / 10_000
+            if area_ha >= min_area_ha:
+                records.append({"year": year, "area_ha": area_ha, "geometry": polygon})
+    if not records:
+        return gpd.GeoDataFrame({"year": [], "area_ha": []}, geometry=[], crs=grid.crs)
+    return gpd.GeoDataFrame(records, geometry="geometry", crs=grid.crs)
+
+
 def _cached_gpkg(path: Path, fetch: Callable[[], gpd.GeoDataFrame]) -> gpd.GeoDataFrame:
     if path.exists():
         log.info("Using cached %s", path)
@@ -311,6 +340,7 @@ class ZoneSuggestion:
 def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
     """Rank candidate pilot windows inside the park and write review outputs."""
     from sylvigie.viz.maps import plot_zone_candidates  # matplotlib is slow to import
+    from sylvigie.viz.webmap import write_zone_webmap
 
     sel = cfg.selection
     raw = data_dir / "raw"
@@ -391,9 +421,19 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
             density.astype(np.float32), density_grid, processed / "cut_density.tif"
         ),
         "candidates": processed / "candidates.gpkg",
+        "cuts": processed / "candidate_cuts.gpkg",
         "map": processed / "candidates.png",
+        "webmap": processed / "candidates_map.html",
     }
     candidates.to_file(outputs["candidates"], driver="GPKG")
+    if len(candidates):
+        cuts = cut_polygons(
+            years_px, grid, sel.years, sel.min_object_ha, tuple(candidates.total_bounds)
+        )
+        cuts.to_file(outputs["cuts"], driver="GPKG")
+        write_zone_webmap(
+            pnr, candidates, cuts, outputs["webmap"], cfg.name, sel.min_object_ha
+        )
     plot_zone_candidates(
         density,
         density_grid,

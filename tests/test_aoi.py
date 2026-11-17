@@ -22,6 +22,24 @@ def test_anchor_must_be_multiple_of_resolution():
         Grid.from_bounds((0, 0, 100, 100), "EPSG:32631", 10, anchor=15)
 
 
+def test_crop():
+    grid = Grid.from_bounds((0, 0, 1000, 1000), "EPSG:32631", 10)
+
+    (rows, cols), sub = grid.crop((200, 600, 500, 900))
+
+    assert (rows, cols) == (slice(10, 40), slice(20, 50))
+    assert sub.bounds == (200, 600, 500, 900)
+    assert sub.shape == (30, 30)
+
+
+def test_crop_clips_to_grid():
+    grid = Grid.from_bounds((0, 0, 1000, 1000), "EPSG:32631", 10)
+
+    _, sub = grid.crop((-500, -500, 100, 100))
+
+    assert sub.bounds == (0, 0, 100, 100)
+
+
 def test_coarsen():
     grid = Grid.from_bounds((0, 0, 1000, 2000), "EPSG:32631", 10)
 

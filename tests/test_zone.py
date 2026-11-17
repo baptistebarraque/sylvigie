@@ -12,6 +12,7 @@ from sylvigie.zone import (
     block_sum,
     compute_cell_stats,
     count_per_cell,
+    cut_polygons,
     find_cut_objects,
     pick_distinct,
     rank_windows,
@@ -168,6 +169,22 @@ def test_pick_distinct_skips_overlapping_windows():
     for k, a in enumerate(positions):
         for b in positions[k + 1 :]:
             assert window_overlap(a, b, 4) <= 0.5
+
+
+def test_cut_polygons_keeps_large_patches_inside_bounds():
+    grid = Grid.from_bounds((0, 0, 1000, 1000), "EPSG:32631", 10)
+    years_px = np.zeros(grid.shape, dtype=np.int16)
+    years_px[10:20, 10:20] = 2023  # 1 ha
+    years_px[50:52, 50:52] = 2023  # 0.04 ha, too small
+    years_px[30:40, 30:40] = 2024  # 1 ha
+    years_px[90:100, 90:100] = 2024  # 1 ha, outside the bounds
+
+    cuts = cut_polygons(years_px, grid, [2023, 2024], 0.5, (0, 0, 800, 1000))
+
+    assert sorted(cuts["year"]) == [2023, 2024]
+    assert cuts["area_ha"].tolist() == pytest.approx([1.0, 1.0])
+    assert cuts.crs.to_epsg() == 32631
+    assert cuts.geometry.iloc[0].bounds == (100.0, 800.0, 200.0, 900.0)
 
 
 def test_window_bounds():
