@@ -3,17 +3,22 @@
 import hashlib
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import geopandas as gpd
 import requests
 from pyproj import CRS
 
+from sylvigie.config import FileSource
+
 log = logging.getLogger(__name__)
 
 WFS_URL = "https://data.geopf.fr/wfs/ows"
 PNR_LAYER = "patrinat_pnr:pnr"
 BDFORET_V2_LAYER = "LANDCOVER.FORESTINVENTORY.V2:formation_vegetale"
+# U-Net forest mask on the departmental BD ORTHO (2023 vintage over the Morvan).
+MASQUE_FORET_LAYER = "IGNF_MASQUE-FORET.2021-2023:masque_foret"
 WFS_PAGE_SIZE = 5000  # server maximum ("CountDefault" in GetCapabilities)
 TIMEOUT_S = 300
 WFS_ATTEMPTS = 6
@@ -40,10 +45,15 @@ def _get_wfs_page(session: requests.Session, params: dict) -> dict:
             reason = repr(error)
         else:
             if response.ok:
-                return response.json()
-            if not _is_transient(response):
+                try:
+                    return response.json()
+                except ValueError:
+                    # Seen under load: HTTP 200 with an empty or truncated body.
+                    reason = "HTTP 200 with a body that is not JSON"
+            elif _is_transient(response):
+                reason = f"HTTP {response.status_code}"
+            else:
                 response.raise_for_status()
-            reason = f"HTTP {response.status_code}"
         if attempt == WFS_ATTEMPTS:
             raise RuntimeError(f"WFS still failing after {attempt} attempts: {reason}")
         log.warning(
@@ -87,6 +97,24 @@ def download_file(
         raise ValueError(f"md5 mismatch for {url}: expected {md5}, got {got}")
     part.replace(dest)
     return dest
+
+
+def download_sufosat(source: FileSource, raw_dir: Path) -> Path:
+    return download_file(source.url, raw_dir / "sufosat" / source.filename, source.md5)
+
+
+def cached_gpkg(path: Path, fetch: Callable[[], gpd.GeoDataFrame]) -> gpd.GeoDataFrame:
+    """Read `path` if it exists, else call `fetch` and save its result there.
+
+    Delete the file to refresh it: WFS layers can change on the server.
+    """
+    if path.exists():
+        log.info("Using cached %s", path)
+        return gpd.read_file(path)
+    gdf = fetch()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_file(path, driver="GPKG")
+    return gdf
 
 
 def fetch_wfs(
@@ -167,4 +195,20 @@ def fetch_bdforet_v2(
         sort_by="id",
         bbox=bbox,
         properties=["id", "code_tfv", "tfv_g11", "essence"],
+    )
+
+
+def fetch_masque_foret(
+    bbox: tuple[float, float, float, float], crs: str = "EPSG:2154"
+) -> gpd.GeoDataFrame:
+    """IGN Masque Forêt 2021-2023 polygons intersecting `bbox` (in `crs`).
+
+    `millesime` is the year of the orthophotos it was derived from.
+    """
+    return fetch_wfs(
+        MASQUE_FORET_LAYER,
+        crs,
+        sort_by="id",
+        bbox=bbox,
+        properties=["id", "nature", "usage", "code_dpt", "millesime"],
     )

@@ -125,6 +125,34 @@ def test_fetch_wfs_gives_up_after_max_attempts(no_sleep):
     assert len(no_sleep) == ancillary.WFS_ATTEMPTS - 1
 
 
+class TruncatedWfs(FakeWfs):
+    """Answers HTTP 200 with a body that is not JSON before answering."""
+
+    def __init__(self, n, failures):
+        super().__init__(n)
+        self.failures = failures
+
+    def get(self, url, params, timeout):
+        if self.failures:
+            self.failures -= 1
+            return BadJsonResponse()
+        return super().get(url, params, timeout)
+
+
+class BadJsonResponse(FakeResponse):
+    def json(self):
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+
+def test_fetch_wfs_retries_ok_response_with_invalid_json(no_sleep):
+    server = TruncatedWfs(n=3, failures=1)
+
+    gdf = fetch_wfs("layer", "EPSG:2154", "id", session=server)
+
+    assert len(gdf) == 3
+    assert no_sleep == [5.0]
+
+
 def test_fetch_wfs_does_not_retry_real_client_errors(no_sleep):
     server = FlakyWfs(n=3, failures=1, text="Unknown property 'foo'")
 

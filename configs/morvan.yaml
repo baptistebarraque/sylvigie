@@ -1,20 +1,28 @@
-# Pilot zone: a window inside the Parc naturel régional du Morvan.
+# Pilot zone: two windows inside the Parc naturel régional du Morvan.
 
 name: morvan
 crs: EPSG:32631 # UTM zone 31N, native CRS of the Sentinel-2 tiles over the Morvan
 resolution: 10 # metres
 
+period:
+  reference_year: 2022 # stable year that changes are measured against
+  detection_years: [2023, 2024] # calibration year, then test year
+
 sufosat:
-  # SUFOSAT v3.0.1 clear-cut dates (YYDDD per 10 m pixel), Zenodo record 17253008.
-  url: https://zenodo.org/api/records/17253008/files/forest-clearcuts_mainland-france_sufosat_dates_v3_set25.tif/content
-  filename: forest-clearcuts_mainland-france_sufosat_dates_v3_set25.tif
-  md5: 7691d5d7ad104f713bf1292282228935
+  # SUFOSAT v3.0.1, Zenodo record 17253008. Both files share one 10 m Lambert-93 grid.
+  dates: # estimated clear-cut date, YYDDD
+    url: https://zenodo.org/api/records/17253008/files/forest-clearcuts_mainland-france_sufosat_dates_v3_set25.tif/content
+    filename: forest-clearcuts_mainland-france_sufosat_dates_v3_set25.tif
+    md5: 7691d5d7ad104f713bf1292282228935
+  prob: # probability of the clear-cut, %
+    url: https://zenodo.org/api/records/17253008/files/forest-clearcuts_mainland-france_sufosat_prob_v3_set25.tif/content
+    filename: forest-clearcuts_mainland-france_sufosat_prob_v3_set25.tif
+    md5: a8e99dad237c07c677b69a36f356aac4
 
 pnr:
   id_mnhn: FR8000025 # PNR du Morvan in the PatriNat layer of the IGN Géoplateforme
 
-selection:
-  years: [2023, 2024] # calibration year, then test year
+selection: # `sylvigie suggest-zone`, over the detection years
   window_km: 25
   step_km: 1
   min_cuts_per_year: 100 # clear-cut objects per year inside the window
@@ -22,6 +30,9 @@ selection:
   min_pnr_fraction: 0.75
   max_overlap: 0.5 # candidates may share at most half their area
   n_candidates: 3
+
+grid: # `sylvigie grid`
+  margin_m: 500 # processed around each window, never evaluated
 
 # Pilot windows chosen from `sylvigie suggest-zone` (2026-11-17), as
 # [xmin, ymin, xmax, ymax] in `crs`. They do not overlap (3 km apart).

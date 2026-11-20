@@ -6,14 +6,14 @@ from sylvigie.cli import app
 
 runner = CliRunner()
 
-PIPELINE_COMMANDS = ["grid", "ingest", "detect", "evaluate"]
+PIPELINE_COMMANDS = ["ingest", "detect", "evaluate"]
 
 
 def test_help_lists_all_commands():
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    for command in ["version", "suggest-zone", *PIPELINE_COMMANDS]:
+    for command in ["version", "suggest-zone", "grid", *PIPELINE_COMMANDS]:
         assert command in result.output
 
 

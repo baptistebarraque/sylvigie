@@ -9,7 +9,6 @@ anywhere else.
 """
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +22,12 @@ from shapely.geometry import box, shape
 
 from sylvigie.aoi import Grid
 from sylvigie.config import ZoneConfig
-from sylvigie.ingest.ancillary import download_file, fetch_bdforet_v2, fetch_pnr
+from sylvigie.ingest.ancillary import (
+    cached_gpkg,
+    download_sufosat,
+    fetch_bdforet_v2,
+    fetch_pnr,
+)
 from sylvigie.ingest.stac import s2_footprints
 from sylvigie.raster import rasterize_on_grid, read_on_grid, write_geotiff
 
@@ -349,16 +353,6 @@ def cut_polygons(
     return gpd.GeoDataFrame(records, geometry="geometry", crs=grid.crs)
 
 
-def _cached_gpkg(path: Path, fetch: Callable[[], gpd.GeoDataFrame]) -> gpd.GeoDataFrame:
-    if path.exists():
-        log.info("Using cached %s", path)
-        return gpd.read_file(path)
-    gdf = fetch()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_file(path, driver="GPKG")
-    return gdf
-
-
 @dataclass(frozen=True)
 class ZoneSuggestion:
     candidates: gpd.GeoDataFrame
@@ -373,6 +367,7 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
     from sylvigie.viz.webmap import write_zone_webmap
 
     sel = cfg.selection
+    years = cfg.period.detection_years
     raw = data_dir / "raw"
     interim = data_dir / "interim" / cfg.name / "zone"
     processed = data_dir / "processed" / cfg.name / "zone"
@@ -381,7 +376,7 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
     window_cells = sel.window_km // sel.step_km
     pixel_ha = cfg.resolution**2 / 10_000
 
-    pnr = _cached_gpkg(
+    pnr = cached_gpkg(
         raw / "ign" / f"pnr_{cfg.pnr.id_mnhn}.gpkg", lambda: fetch_pnr(cfg.pnr.id_mnhn)
     ).to_crs(cfg.crs)
     # Cell corners on multiples of step_m, hence on the Sentinel-2 10 m and 20 m grids.
@@ -389,13 +384,11 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
     log.info("Analysis grid: %d x %d pixels", grid.width, grid.height)
 
     bbox_l93 = transform_bounds(grid.crs, "EPSG:2154", *grid.bounds, densify_pts=21)
-    bdforet = _cached_gpkg(
+    bdforet = cached_gpkg(
         raw / "ign" / f"bdforet_v2_{cfg.name}_park.gpkg",
         lambda: fetch_bdforet_v2(bbox_l93),
     )
-    sufosat = download_file(
-        cfg.sufosat.url, raw / "sufosat" / cfg.sufosat.filename, cfg.sufosat.md5
-    )
+    sufosat = download_sufosat(cfg.sufosat.dates, raw)
 
     # Nearest neighbour: dates and classes must never be interpolated.
     dates = read_on_grid(sufosat, grid)
@@ -411,9 +404,9 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
     years_px = sufosat_years(dates)
     min_object_px = round(sel.min_object_ha / pixel_ha)
     stats = compute_cell_stats(
-        years_px, forest_class, pnr_mask, sel.years, cell_px, min_object_px
+        years_px, forest_class, pnr_mask, years, cell_px, min_object_px
     )
-    profile = area_profile(years_px, forest_class, pnr_mask, sel.years)
+    profile = area_profile(years_px, forest_class, pnr_mask, years)
     log.info(
         "Park profile: cut rate %.2f %%/yr, conifer share %.0f %%",
         100 * profile.cut_rate,
@@ -421,7 +414,7 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
     )
     ranked = rank_windows(
         stats,
-        sel.years,
+        years,
         window_cells,
         profile,
         sel.min_cuts_per_year,
@@ -440,7 +433,7 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
         candidates = candidates.join(s2_coverage(candidates, S2_SAMPLE_PERIOD))
 
     # Mean annual clear-cut area per cell, in ha per km2 (cells are step_km wide).
-    density = np.mean([stats.cut_px[y] for y in sel.years], axis=0) * pixel_ha
+    density = np.mean([stats.cut_px[y] for y in years], axis=0) * pixel_ha
     density /= sel.step_km**2
     density_grid = grid.coarsen(cell_px)
     outputs = {
@@ -457,7 +450,7 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
     candidates.to_file(outputs["candidates"], driver="GPKG")
     if len(candidates):
         cuts = cut_polygons(
-            years_px, grid, sel.years, sel.min_object_ha, tuple(candidates.total_bounds)
+            years_px, grid, years, sel.min_object_ha, tuple(candidates.total_bounds)
         )
         cuts.to_file(outputs["cuts"], driver="GPKG")
         write_zone_webmap(
@@ -470,6 +463,6 @@ def suggest_zone(cfg: ZoneConfig, data_dir: Path) -> ZoneSuggestion:
         candidates,
         outputs["map"],
         title=f"{cfg.name.capitalize()}: candidate pilot windows ({sel.window_km} km)",
-        years=sel.years,
+        years=years,
     )
     return ZoneSuggestion(candidates, len(ranked), profile, outputs)

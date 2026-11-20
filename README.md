@@ -5,9 +5,9 @@ Sentinel-1/2 time series and delivers alerts on an interactive map.
 
 ## Status
 
-Phase 1 (`sylvigie-detect`), roadmap step 2a: choice of the pilot zone. The
-CLI lists every pipeline stage; stages not built yet say which roadmap step
-will implement them.
+Phase 1 (`sylvigie-detect`), roadmap step 2b: reference grid, forest mask
+and labels of each pilot window. The CLI lists every pipeline stage; stages
+not built yet say which roadmap step will implement them.
 
 ## Data sources and licences
 
@@ -15,7 +15,8 @@ will implement them.
   doi:10.1109/JSTARS.2024.3429012, [Zenodo record 17253008](https://zenodo.org/records/17253008).
   The record's metadata says CC BY 4.0 but its description says CC BY-NC 4.0:
   treated as non-commercial.
-- Forest map (BD Forêt V2) and park boundaries (PatriNat): IGN Géoplateforme.
+- Forest maps (BD Forêt V2, Masque Forêt 2021-2023) and park boundaries
+  (PatriNat): IGN Géoplateforme.
 
 ## Setup
 
@@ -46,6 +47,26 @@ to the whole park in cut rate and conifer share, and **densest** windows
 (D1, D2, ...). Copy the chosen bboxes into the config's `windows` field:
 `dev` (where thresholds and models are tuned) and `eval` (where headline
 metrics are measured). For the Morvan, `dev` = D1 and `eval` = R1.
+
+Build the reference layers of each window (roadmap step 2b) on a 10 m grid
+aligned with Sentinel-2, covering the window plus a margin
+(`grid.margin_m`) that is processed but never evaluated:
+
+```sh
+uv run sylvigie grid --config configs/morvan.yaml
+```
+
+It writes to `data/interim/<zone>/<window>/`:
+
+| File | Content |
+| --- | --- |
+| `eval_area.tif` | 1 = window (evaluated), 0 = margin |
+| `forest_mask.tif` | 1 = forest: union of BD Forêt V2 and IGN Masque Forêt 2021-2023 |
+| `forest_type.tif` | species group from BD Forêt V2 (codes in the file's metadata) |
+| `sufosat_date.tif` | SUFOSAT clear-cut date, days since 1970-01-01, 0 = none |
+| `sufosat_prob.tif` | SUFOSAT clear-cut probability (%), 0 = none |
+| `summary.csv` | area and clear-cut area by forest type and year |
+| `reference_map.html` | the layers over IGN orthophotos, for visual checks |
 
 ## Development
 

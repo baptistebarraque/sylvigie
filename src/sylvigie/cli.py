@@ -77,9 +77,19 @@ def suggest_zone(config: Path = ConfigOption, data_dir: Path = DataDirOption) ->
 
 
 @app.command()
-def grid() -> None:
-    """Build the reference grid, forest mask and SUFOSAT labels for a zone."""
-    _not_implemented("2b")
+def grid(config: Path = ConfigOption, data_dir: Path = DataDirOption) -> None:
+    """Build the reference grid, forest mask and SUFOSAT labels of each window."""
+    from sylvigie.config import load_config
+    from sylvigie.reference import build_reference
+
+    cfg = load_config(config)
+    for window in build_reference(cfg, data_dir):
+        typer.echo(f"\n=== {window.name} window (inside the margin)")
+        typer.echo(window.summary.round(1).to_string(index=False))
+        shares = ", ".join(f"{y}: {s:.1%}" for y, s in window.coverage.items())
+        typer.echo(f"Clear-cut pixels inside the forest mask: {shares}")
+        for name, path in window.outputs.items():
+            typer.echo(f"{name:>14}: {path}")
 
 
 @app.command()

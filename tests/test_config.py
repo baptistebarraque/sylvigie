@@ -68,6 +68,26 @@ def test_windows_are_optional(tmp_path, raw_config):
     assert load_config(_write(tmp_path, raw_config)).windows is None
 
 
+def test_margin_must_keep_20m_alignment(tmp_path, raw_config):
+    raw_config["grid"]["margin_m"] = 510
+
+    with pytest.raises(ValidationError, match="margin_m"):
+        load_config(_write(tmp_path, raw_config))
+
+
+def test_detection_years_come_after_reference_year(tmp_path, raw_config):
+    raw_config["period"] = {"reference_year": 2023, "detection_years": [2023, 2024]}
+
+    with pytest.raises(ValidationError, match="after reference_year"):
+        load_config(_write(tmp_path, raw_config))
+
+
+def test_period_years(raw_config, tmp_path):
+    cfg = load_config(_write(tmp_path, raw_config))
+
+    assert cfg.period.years == [2022, 2023, 2024]
+
+
 def test_window_must_be_whole_number_of_steps(tmp_path, raw_config):
     raw_config["selection"]["window_km"] = 25
     raw_config["selection"]["step_km"] = 2
