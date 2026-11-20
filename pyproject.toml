@@ -18,6 +18,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rasterio>=1.5.2",
     "rioxarray>=0.24.0",
+    "scipy>=1.18.1",
     "shapely>=2.2.0",
     "typer>=0.29.1",
     "xarray>=2026.9.0",
