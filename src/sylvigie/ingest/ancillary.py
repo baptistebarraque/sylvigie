@@ -40,10 +40,15 @@ def _get_wfs_page(session: requests.Session, params: dict) -> dict:
             reason = repr(error)
         else:
             if response.ok:
-                return response.json()
-            if not _is_transient(response):
+                try:
+                    return response.json()
+                except ValueError:
+                    # Seen under load: HTTP 200 with an empty or truncated body.
+                    reason = "HTTP 200 with a body that is not JSON"
+            elif _is_transient(response):
+                reason = f"HTTP {response.status_code}"
+            else:
                 response.raise_for_status()
-            reason = f"HTTP {response.status_code}"
         if attempt == WFS_ATTEMPTS:
             raise RuntimeError(f"WFS still failing after {attempt} attempts: {reason}")
         log.warning(
