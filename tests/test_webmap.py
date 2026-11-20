@@ -41,3 +41,28 @@ def test_write_zone_webmap_embeds_layers(tmp_path):
     assert 3 < lon < 5 and 46 < lat < 48  # reprojected to lon/lat for Leaflet
     assert "</script>" not in payload  # cannot break out of the inline script
     assert "ORTHOIMAGERY.ORTHOPHOTOS" in html
+    assert data["year_colors"] == {"2023": "#ffb000", "2024": "#ff3fa4"}
+
+
+def test_categorical_overlay_is_reprojected_to_web_mercator():
+    import base64
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from sylvigie.aoi import Grid
+    from sylvigie.viz.webmap import categorical_overlay
+
+    grid = Grid.from_bounds((620000, 5230000, 621000, 5231000), UTM, 10)
+    codes = np.zeros(grid.shape, np.uint8)
+    codes[:, :50] = 3  # left half
+
+    png, bounds = categorical_overlay(codes, grid, {3: "#ff0000"})
+
+    (south, west), (north, east) = bounds
+    assert 3 < west < east < 5 and 46 < south < north < 48
+    image = Image.open(io.BytesIO(base64.b64decode(png.split(",", 1)[1])))
+    pixels = np.asarray(image)
+    assert set(np.unique(pixels)) == {0, 1}  # transparent + one colour
+    assert image.getpalette()[3:6] == [255, 0, 0]
