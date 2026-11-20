@@ -11,18 +11,37 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class SufosatSource(_Frozen):
+class FileSource(_Frozen):
     url: str
     filename: str
     md5: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+
+class SufosatSources(_Frozen):
+    dates: FileSource  # clear-cut date per pixel, YYDDD
+    prob: FileSource  # detection probability per pixel, %
 
 
 class PnrSource(_Frozen):
     id_mnhn: str
 
 
+class Period(_Frozen):
+    reference_year: int  # stable year the changes are measured against
+    detection_years: list[int] = Field(min_length=1)  # first is the calibration year
+
+    @model_validator(mode="after")
+    def _detection_after_reference(self) -> "Period":
+        if min(self.detection_years) <= self.reference_year:
+            raise ValueError("detection_years must come after reference_year")
+        return self
+
+    @property
+    def years(self) -> list[int]:
+        return [self.reference_year, *self.detection_years]
+
+
 class SelectionParams(_Frozen):
-    years: list[int] = Field(min_length=1)
     window_km: int = Field(gt=0)
     step_km: int = Field(gt=0)
     min_cuts_per_year: int = Field(ge=0)
@@ -36,6 +55,12 @@ class SelectionParams(_Frozen):
         if self.window_km % self.step_km:
             raise ValueError("window_km must be a multiple of step_km")
         return self
+
+
+class GridParams(_Frozen):
+    # Processed around each window but never evaluated, so that clear-cuts
+    # crossing the edge stay whole and filters behave the same at the edge.
+    margin_m: int = Field(ge=0)
 
 
 Bbox = tuple[float, float, float, float]  # xmin, ymin, xmax, ymax
@@ -72,9 +97,11 @@ class ZoneConfig(_Frozen):
     name: str
     crs: str
     resolution: float = Field(gt=0)
-    sufosat: SufosatSource
+    period: Period
+    sufosat: SufosatSources
     pnr: PnrSource
     selection: SelectionParams
+    grid: GridParams
     windows: Windows | None = None  # filled in once the windows are chosen
 
     @model_validator(mode="after")
@@ -92,6 +119,13 @@ class ZoneConfig(_Frozen):
         step_m = self.selection.step_km * 1000
         if step_m % self.resolution:
             raise ValueError("selection.step_km must be a multiple of resolution")
+        return self
+
+    @model_validator(mode="after")
+    def _margin_keeps_20m_alignment(self) -> "ZoneConfig":
+        # Sentinel-2 20 m bands: grid edges must stay on multiples of 2 pixels.
+        if self.grid.margin_m % (2 * self.resolution):
+            raise ValueError("grid.margin_m must be a multiple of 2 x resolution")
         return self
 
 
