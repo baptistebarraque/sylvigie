@@ -7,6 +7,7 @@ its own command.
 """
 
 import logging
+from enum import StrEnum
 from pathlib import Path
 
 import typer
@@ -92,10 +93,76 @@ def grid(config: Path = ConfigOption, data_dir: Path = DataDirOption) -> None:
             typer.echo(f"{name:>14}: {path}")
 
 
+class WindowChoice(StrEnum):
+    dev = "dev"
+    eval = "eval"
+    all = "all"
+
+
+WindowOption = typer.Option(WindowChoice.all, help="Window to process.")
+SubsetOption = typer.Option(
+    None, help="Only a centred square of this size in km, to develop on (e.g. 5)."
+)
+KeepStagingOption = typer.Option(
+    False, help="Keep the per-day stores after the cube is built."
+)
+
+
 @app.command()
-def ingest() -> None:
-    """Download Sentinel-2 data and write the masked index cube (Zarr)."""
-    _not_implemented("3")
+def ingest(
+    config: Path = ConfigOption,
+    data_dir: Path = DataDirOption,
+    window: WindowChoice = WindowOption,
+    subset_km: float | None = SubsetOption,
+    keep_staging: bool = KeepStagingOption,
+) -> None:
+    """Build the Sentinel-2 L2A time series of each window (resumable)."""
+    import pandas as pd
+
+    from sylvigie.config import load_config
+    from sylvigie.ingest.sentinel2 import build_s2_cube
+
+    cfg = load_config(config)
+    windows = ["dev", "eval"] if window is WindowChoice.all else [window.value]
+    for name in windows:
+        report = build_s2_cube(cfg, name, data_dir, subset_km, keep_staging)
+        days = report.days
+        typer.echo(f"\n=== {name} window: {len(days)} solar days")
+        typer.echo(days["status"].value_counts().to_string())
+        kept = days[days["status"].isin(["kept", "written"])]
+        if len(kept):
+            when = pd.to_datetime(kept["day"])
+            per_month = pd.crosstab(when.dt.year, when.dt.month)
+            typer.echo("\nKept days per month:")
+            typer.echo(per_month.to_string())
+        typer.echo(f"\nManifest: {report.paths.manifest}")
+        typer.echo(f"Cube:     {report.paths.cube}")
+
+
+@app.command("plot-series")
+def plot_series(
+    config: Path = ConfigOption,
+    data_dir: Path = DataDirOption,
+    window: WindowChoice = WindowOption,
+    subset_km: float | None = SubsetOption,
+) -> None:
+    """Plot index time series of typical pixels (stable, cut, spruce)."""
+    from sylvigie.config import load_config
+    from sylvigie.viz.timeseries import plot_window_series
+
+    cfg = load_config(config)
+    windows = ["dev", "eval"] if window is WindowChoice.all else [window.value]
+    for name in windows:
+        figure, csv, pixels = plot_window_series(cfg, name, data_dir, subset_km)
+        typer.echo(f"\n=== {name} window")
+        for p in pixels:
+            cut = p.cut_date.isoformat() if p.cut_date else "-"
+            label = p.situation.label.replace("\n", " ")
+            typer.echo(
+                f"{label:<36} row {p.row:>5} col {p.col:>5} "
+                f"depth {p.depth_px:4.1f} px  SUFOSAT cut {cut}"
+            )
+        typer.echo(f"Figure: {figure}\nValues: {csv}")
 
 
 @app.command()

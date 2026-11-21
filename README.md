@@ -5,9 +5,9 @@ Sentinel-1/2 time series and delivers alerts on an interactive map.
 
 ## Status
 
-Phase 1 (`sylvigie-detect`), roadmap step 2b: reference grid, forest mask
-and labels of each pilot window. The CLI lists every pipeline stage; stages
-not built yet say which roadmap step will implement them.
+Phase 1 (`sylvigie-detect`), roadmap step 3: Sentinel-2 time-series cube of
+each pilot window. The CLI lists every pipeline stage; stages not built yet
+say which roadmap step will implement them.
 
 ## Data sources and licences
 
@@ -17,6 +17,8 @@ not built yet say which roadmap step will implement them.
   treated as non-commercial.
 - Forest maps (BD Forêt V2, Masque Forêt 2021-2023) and park boundaries
   (PatriNat): IGN Géoplateforme.
+- Imagery: Copernicus Sentinel-2 L2A, served by Microsoft Planetary
+  Computer. CRSWIR follows the fordead package (INRAE).
 
 ## Setup
 
@@ -67,6 +69,37 @@ It writes to `data/interim/<zone>/<window>/`:
 | `sufosat_prob.tif` | SUFOSAT clear-cut probability (%), 0 = none |
 | `summary.csv` | area and clear-cut area by forest type and year |
 | `reference_map.html` | the layers over IGN orthophotos, for visual checks |
+
+Build the Sentinel-2 L2A time series of each window (roadmap step 3) from
+Microsoft Planetary Computer. The run is resumable: it keeps a per-day
+manifest in `data/raw/s2/<zone>/<window>/` and skips finished days.
+
+```sh
+uv run sylvigie ingest --config configs/morvan.yaml --window dev --subset-km 5  # develop
+uv run sylvigie ingest --config configs/morvan.yaml                             # both windows
+```
+
+1. Search the catalogue for the period (`period`), drop duplicate items
+   (ESA reprocessings), group items by solar day.
+2. Screen each day on its 20 m scene classification (SCL): keep it when at
+   least `s2.min_clear_fraction` of the window's forest pixels are clear.
+3. Download the bands of kept days onto the window grid, remove the +1000
+   offset of processing baselines >= 04.00 item by item, fuse tiles.
+4. Gather the days into `data/interim/<zone>/<window>/s2_cube.zarr`
+   (Zarr v3): int16 reflectance x 10 000 per band plus SCL, each at its
+   native resolution (`y, x` at 10 m for B04 and B08; `y20, x20` at 20 m for
+   B05, B8A, B11, B12 and SCL), chunked to hold the whole time series of
+   2.56 x 2.56 km blocks. 20 m bands are resampled to 10 m and the cloud mask
+   is applied when reading (`sylvigie.preprocess.indices`), which halves the
+   cube on disk and lets the mask change without downloading again.
+
+Plot index time series (NBR, NDVI, CRSWIR) of typical pixels picked from the
+step 2b layers: stable conifer, stable broadleaf, Douglas fir and fir/spruce
+clear-cuts of the calibration year:
+
+```sh
+uv run sylvigie plot-series --config configs/morvan.yaml --window dev --subset-km 5
+```
 
 ## Development
 

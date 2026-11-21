@@ -76,7 +76,7 @@ def test_margin_must_keep_20m_alignment(tmp_path, raw_config):
 
 
 def test_detection_years_come_after_reference_year(tmp_path, raw_config):
-    raw_config["period"] = {"reference_year": 2023, "detection_years": [2023, 2024]}
+    raw_config["period"]["reference_year"] = 2023
 
     with pytest.raises(ValidationError, match="after reference_year"):
         load_config(_write(tmp_path, raw_config))
@@ -86,6 +86,14 @@ def test_period_years(raw_config, tmp_path):
     cfg = load_config(_write(tmp_path, raw_config))
 
     assert cfg.period.years == [2022, 2023, 2024]
+    assert cfg.period.load_from.isoformat() == "2022-01-01"
+
+
+def test_load_until_must_cover_last_detection_year(tmp_path, raw_config):
+    raw_config["period"]["load_until"] = "2024-06-30"
+
+    with pytest.raises(ValidationError, match="load_until"):
+        load_config(_write(tmp_path, raw_config))
 
 
 def test_window_must_be_whole_number_of_steps(tmp_path, raw_config):

@@ -4,6 +4,7 @@ import math
 from dataclasses import dataclass
 
 from affine import Affine
+from odc.geo.geobox import GeoBox
 from rasterio.crs import CRS
 
 
@@ -80,6 +81,10 @@ class Grid:
             height=row1 - row0,
         )
         return (slice(row0, row1), slice(col0, col1)), sub
+
+    def to_geobox(self) -> GeoBox:
+        """The same grid as an odc-geo GeoBox, the form odc-stac loads onto."""
+        return GeoBox(self.shape, self.transform, self.crs)
 
     def coarsen(self, factor: int) -> "Grid":
         """Grid of `factor` x `factor` pixel blocks; the shape must divide evenly."""
