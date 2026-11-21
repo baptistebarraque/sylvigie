@@ -7,6 +7,7 @@ resolution: 10 # metres
 period:
   reference_year: 2022 # stable year that changes are measured against
   detection_years: [2023, 2024] # calibration year, then test year
+  load_until: 2025-06-30 # late-2024 cuts often only show after the winter clouds
 
 sufosat:
   # SUFOSAT v3.0.1, Zenodo record 17253008. Both files share one 10 m Lambert-93 grid.
@@ -33,6 +34,16 @@ selection: # `sylvigie suggest-zone`, over the detection years
 
 grid: # `sylvigie grid`
   margin_m: 500 # processed around each window, never evaluated
+
+s2: # `sylvigie ingest`: Sentinel-2 L2A from Microsoft Planetary Computer
+  collection: sentinel-2-l2a
+  # 10 m: B04 red, B08 NIR. 20 m (resampled to 10 m): B05 red edge, B8A narrow
+  # NIR, B11 and B12 shortwave infrared. Enough for NDVI, NBR, NDMI, NDRE, CRSWIR.
+  bands: [B04, B05, B08, B8A, B11, B12]
+  max_tile_cloud: 80 # loose pre-filter on the whole 110 km tile
+  min_clear_fraction: 0.2 # share of the window's forest pixels that must be clear
+  scl_valid: [4, 5, 6] # vegetation, bare soil, water
+  mask_dilation_px: 2 # grow the cloud mask to catch cloud edges
 
 # Pilot windows chosen from `sylvigie suggest-zone` (2026-11-17), as
 # [xmin, ymin, xmax, ymax] in `crs`. They do not overlap (3 km apart).

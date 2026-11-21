@@ -1,5 +1,6 @@
 """Zone configuration: pydantic models loaded from a YAML file."""
 
+import datetime as dt
 from pathlib import Path
 
 import yaml
@@ -29,16 +30,43 @@ class PnrSource(_Frozen):
 class Period(_Frozen):
     reference_year: int  # stable year the changes are measured against
     detection_years: list[int] = Field(min_length=1)  # first is the calibration year
+    # Imagery is loaded past the last detection year: a cut made late in the
+    # year is often only visible after the winter clouds.
+    load_until: dt.date
 
     @model_validator(mode="after")
     def _detection_after_reference(self) -> "Period":
         if min(self.detection_years) <= self.reference_year:
             raise ValueError("detection_years must come after reference_year")
+        if self.load_until < dt.date(max(self.detection_years), 12, 31):
+            raise ValueError("load_until must cover the last detection year")
         return self
 
     @property
     def years(self) -> list[int]:
         return [self.reference_year, *self.detection_years]
+
+    @property
+    def load_from(self) -> dt.date:
+        return dt.date(self.reference_year, 1, 1)
+
+
+class S2Params(_Frozen):
+    """Sentinel-2 L2A ingestion (`sylvigie ingest`)."""
+
+    collection: str
+    # Reflectance bands kept in the cube; indices are computed from them.
+    bands: list[str] = Field(min_length=1)
+    # Tile-level cloud cover is only a loose pre-filter: the clear fraction
+    # that matters is measured on the window's forest pixels.
+    max_tile_cloud: float = Field(ge=0, le=100)
+    min_clear_fraction: float = Field(ge=0, le=1)
+    # Scene classification (SCL) classes kept as clear: 4 vegetation,
+    # 5 bare soil, 6 water. Everything else (clouds, shadows, snow,
+    # saturated, no data) is masked, then the mask is grown by
+    # `mask_dilation_px` pixels to catch cloud edges.
+    scl_valid: list[int] = Field(min_length=1)
+    mask_dilation_px: int = Field(ge=0)
 
 
 class SelectionParams(_Frozen):
@@ -102,6 +130,7 @@ class ZoneConfig(_Frozen):
     pnr: PnrSource
     selection: SelectionParams
     grid: GridParams
+    s2: S2Params
     windows: Windows | None = None  # filled in once the windows are chosen
 
     @model_validator(mode="after")
