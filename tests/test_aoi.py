@@ -40,6 +40,16 @@ def test_crop_clips_to_grid():
     assert sub.bounds == (0, 0, 100, 100)
 
 
+def test_to_geobox_keeps_the_grid():
+    grid = Grid.from_bounds((1000, 5000, 2000, 6000), "EPSG:32631", 10)
+
+    geobox = grid.to_geobox()
+
+    assert geobox.shape == grid.shape
+    assert geobox.affine == grid.transform
+    assert geobox.crs.epsg == 32631
+
+
 def test_coarsen():
     grid = Grid.from_bounds((0, 0, 1000, 2000), "EPSG:32631", 10)
 
