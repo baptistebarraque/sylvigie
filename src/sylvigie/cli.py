@@ -103,6 +103,9 @@ WindowOption = typer.Option(WindowChoice.all, help="Window to process.")
 SubsetOption = typer.Option(
     None, help="Only a centred square of this size in km, to develop on (e.g. 5)."
 )
+KeepStagingOption = typer.Option(
+    False, help="Keep the per-day stores after the cube is built."
+)
 
 
 @app.command()
@@ -111,6 +114,7 @@ def ingest(
     data_dir: Path = DataDirOption,
     window: WindowChoice = WindowOption,
     subset_km: float | None = SubsetOption,
+    keep_staging: bool = KeepStagingOption,
 ) -> None:
     """Build the Sentinel-2 L2A time series of each window (resumable)."""
     import pandas as pd
@@ -121,7 +125,7 @@ def ingest(
     cfg = load_config(config)
     windows = ["dev", "eval"] if window is WindowChoice.all else [window.value]
     for name in windows:
-        report = build_s2_cube(cfg, name, data_dir, subset_km)
+        report = build_s2_cube(cfg, name, data_dir, subset_km, keep_staging)
         days = report.days
         typer.echo(f"\n=== {name} window: {len(days)} solar days")
         typer.echo(days["status"].value_counts().to_string())
@@ -132,6 +136,7 @@ def ingest(
             typer.echo("\nKept days per month:")
             typer.echo(per_month.to_string())
         typer.echo(f"\nManifest: {report.paths.manifest}")
+        typer.echo(f"Cube:     {report.paths.cube}")
 
 
 @app.command()

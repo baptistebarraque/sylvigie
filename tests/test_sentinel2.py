@@ -86,6 +86,8 @@ def window(tmp_path, cfg):
         raw=tmp_path,
         manifest=tmp_path / "manifest.csv",
         items=tmp_path / "items.json",
+        days=tmp_path / "days",
+        cube=tmp_path / "cube" / "s2_cube.zarr",
         forest_mask=write_geotiff(forest, grid, tmp_path / "forest_mask.tif"),
     )
     return grid, paths
