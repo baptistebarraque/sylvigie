@@ -7,6 +7,7 @@ its own command.
 """
 
 import logging
+from enum import StrEnum
 from pathlib import Path
 
 import typer
@@ -92,10 +93,45 @@ def grid(config: Path = ConfigOption, data_dir: Path = DataDirOption) -> None:
             typer.echo(f"{name:>14}: {path}")
 
 
+class WindowChoice(StrEnum):
+    dev = "dev"
+    eval = "eval"
+    all = "all"
+
+
+WindowOption = typer.Option(WindowChoice.all, help="Window to process.")
+SubsetOption = typer.Option(
+    None, help="Only a centred square of this size in km, to develop on (e.g. 5)."
+)
+
+
 @app.command()
-def ingest() -> None:
-    """Download Sentinel-2 data and write the masked index cube (Zarr)."""
-    _not_implemented("3")
+def ingest(
+    config: Path = ConfigOption,
+    data_dir: Path = DataDirOption,
+    window: WindowChoice = WindowOption,
+    subset_km: float | None = SubsetOption,
+) -> None:
+    """Build the Sentinel-2 L2A time series of each window (resumable)."""
+    import pandas as pd
+
+    from sylvigie.config import load_config
+    from sylvigie.ingest.sentinel2 import build_s2_cube
+
+    cfg = load_config(config)
+    windows = ["dev", "eval"] if window is WindowChoice.all else [window.value]
+    for name in windows:
+        report = build_s2_cube(cfg, name, data_dir, subset_km)
+        days = report.days
+        typer.echo(f"\n=== {name} window: {len(days)} solar days")
+        typer.echo(days["status"].value_counts().to_string())
+        kept = days[days["status"] == "kept"]
+        if len(kept):
+            when = pd.to_datetime(kept["day"])
+            per_month = pd.crosstab(when.dt.year, when.dt.month)
+            typer.echo("\nKept days per month:")
+            typer.echo(per_month.to_string())
+        typer.echo(f"\nManifest: {report.paths.manifest}")
 
 
 @app.command()
