@@ -13,7 +13,14 @@ def test_help_lists_all_commands():
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    for command in ["version", "suggest-zone", "grid", "ingest", *PIPELINE_COMMANDS]:
+    for command in [
+        "version",
+        "suggest-zone",
+        "grid",
+        "ingest",
+        "plot-series",
+        *PIPELINE_COMMANDS,
+    ]:
         assert command in result.output
 
 

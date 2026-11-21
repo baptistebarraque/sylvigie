@@ -129,7 +129,7 @@ def ingest(
         days = report.days
         typer.echo(f"\n=== {name} window: {len(days)} solar days")
         typer.echo(days["status"].value_counts().to_string())
-        kept = days[days["status"] == "kept"]
+        kept = days[days["status"].isin(["kept", "written"])]
         if len(kept):
             when = pd.to_datetime(kept["day"])
             per_month = pd.crosstab(when.dt.year, when.dt.month)
@@ -137,6 +137,32 @@ def ingest(
             typer.echo(per_month.to_string())
         typer.echo(f"\nManifest: {report.paths.manifest}")
         typer.echo(f"Cube:     {report.paths.cube}")
+
+
+@app.command("plot-series")
+def plot_series(
+    config: Path = ConfigOption,
+    data_dir: Path = DataDirOption,
+    window: WindowChoice = WindowOption,
+    subset_km: float | None = SubsetOption,
+) -> None:
+    """Plot index time series of typical pixels (stable, cut, spruce)."""
+    from sylvigie.config import load_config
+    from sylvigie.viz.timeseries import plot_window_series
+
+    cfg = load_config(config)
+    windows = ["dev", "eval"] if window is WindowChoice.all else [window.value]
+    for name in windows:
+        figure, csv, pixels = plot_window_series(cfg, name, data_dir, subset_km)
+        typer.echo(f"\n=== {name} window")
+        for p in pixels:
+            cut = p.cut_date.isoformat() if p.cut_date else "-"
+            label = p.situation.label.replace("\n", " ")
+            typer.echo(
+                f"{label:<36} row {p.row:>5} col {p.col:>5} "
+                f"depth {p.depth_px:4.1f} px  SUFOSAT cut {cut}"
+            )
+        typer.echo(f"Figure: {figure}\nValues: {csv}")
 
 
 @app.command()
