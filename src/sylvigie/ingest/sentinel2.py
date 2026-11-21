@@ -380,7 +380,8 @@ def _block(name: str) -> int:
 
 
 def _encoding(ds: xr.Dataset, chunks: dict[str, dict]) -> dict:
-    encoding = {}
+    # Acquisition times carry milliseconds: store them exactly, from a fixed epoch.
+    encoding = {"time": {"units": "milliseconds since 1970-01-01", "dtype": "int64"}}
     for name in ds.data_vars:
         fill = SCL_NODATA if name == "SCL" else NODATA
         encoding[name] = {"_FillValue": fill, "compressors": _COMPRESSORS} | chunks[
