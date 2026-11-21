@@ -18,6 +18,7 @@ import xarray as xr
 from scipy import ndimage
 
 from sylvigie.aoi import Grid
+from sylvigie.preprocess.resample import upsample_x2
 from sylvigie.preprocess.s2 import REFLECTANCE_SCALE
 
 # Centre wavelengths (nm) used by fordead's CRSWIR (fordead.preprocess,
@@ -75,10 +76,64 @@ def clear_mask(scl: xr.DataArray, keep: list[int], dilation_px: int) -> xr.DataA
     return ~invalid.copy(data=grown)
 
 
+def at_10m(cube: xr.Dataset, name: str, method: str = "bilinear") -> xr.DataArray:
+    """A cube variable on the 10 m grid; 20 m variables are upsampled x2."""
+    da = cube[name]
+    if "y20" not in da.dims:
+        return da
+    data = upsample_x2(da.data, method)
+    return xr.DataArray(
+        data,
+        dims=("time", "y", "x"),
+        coords={"time": cube["time"], "y": cube["y"], "x": cube["x"]},
+        name=name,
+    )
+
+
+def clear_mask_10m(cube: xr.Dataset, keep: list[int], dilation_px: int) -> xr.DataArray:
+    """Cloud mask from the cube's SCL, on the 10 m grid.
+
+    SCL is a 20 m product: the mask is dilated at 20 m (half the pixels for
+    the same ground distance) and each 20 m pixel then covers 2 x 2 at 10 m.
+    """
+    scl = cube["SCL"]
+    if "y20" not in scl.dims:
+        return clear_mask(scl, keep, dilation_px)
+    clear20 = clear_mask(scl, keep, -(-dilation_px // 2))
+    data = upsample_x2(clear20.data, "nearest")
+    return xr.DataArray(
+        data,
+        dims=("time", "y", "x"),
+        coords={"time": cube["time"], "y": cube["y"], "x": cube["x"]},
+    )
+
+
+def crop(cube: xr.Dataset, rows: slice, cols: slice) -> tuple[xr.Dataset, int, int]:
+    """Cut both resolutions of a cube consistently.
+
+    The window is widened to even 10 m pixel edges so it falls on whole 20 m
+    pixels. Returns the cut cube and the 10 m row and column of its origin.
+    """
+    r0, c0 = max(rows.start, 0) // 2 * 2, max(cols.start, 0) // 2 * 2
+    r1 = min(-(-rows.stop // 2) * 2, cube.sizes["y"])
+    c1 = min(-(-cols.stop // 2) * 2, cube.sizes["x"])
+    fine = {"y": slice(r0, r1), "x": slice(c0, c1)}
+    coarse = {"y20": slice(r0 // 2, r1 // 2), "x20": slice(c0 // 2, c1 // 2)}
+    return (
+        cube.isel({**fine, **{k: v for k, v in coarse.items() if k in cube.dims}}),
+        r0,
+        c0,
+    )
+
+
 def reflectance(cube: xr.Dataset, band: str) -> xr.DataArray:
-    """Reflectance 0-1. Negative values (dark winter conifers in the red band,
-    sensor noise) are set to 0, otherwise NDVI could exceed 1."""
-    return (cube[band].astype(np.float32) / REFLECTANCE_SCALE).clip(min=0)
+    """Reflectance 0-1 on the 10 m grid (20 m bands upsampled bilinearly).
+
+    Negative values (dark winter conifers in the red band, sensor noise) are
+    set to 0, otherwise NDVI could exceed 1.
+    """
+    values = at_10m(cube, band, "bilinear").astype(np.float32)
+    return (values / REFLECTANCE_SCALE).clip(min=0)
 
 
 def normalized_difference(a: xr.DataArray, b: xr.DataArray) -> xr.DataArray:
@@ -104,7 +159,7 @@ def compute_index(
         values = crswir(*(reflectance(cube, band) for band in ("B8A", "B11", "B12")))
     else:
         raise ValueError(f"unknown index {name}; available: {INDICES}")
-    clear = clear_mask(cube["SCL"], scl_valid, dilation_px)
+    clear = clear_mask_10m(cube, scl_valid, dilation_px)
     # Division by zero (all bands 0) gives inf: treat as missing.
     values = values.where(clear & np.isfinite(values))
     return values.astype(np.float32).rename(name)

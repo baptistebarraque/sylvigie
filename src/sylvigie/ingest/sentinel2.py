@@ -5,12 +5,15 @@
 2. screen: load only the scene classification (SCL, 20 m) of each day and
    measure the share of the window's forest pixels that are clear; days
    under `min_clear_fraction` are dropped before downloading any band.
-3. download: load the bands and SCL of each kept day onto the window grid,
-   harmonise each item (processing-baseline offset), fuse the day's items
-   and write the day to its own small Zarr store ("staging").
+3. download: load the bands and SCL of each kept day at their native
+   resolution (10 m or 20 m, on grids aligned with the Sentinel-2 pixels, so
+   nothing is interpolated), harmonise each item (processing-baseline
+   offset), fuse the day's items and write the day to its own small Zarr
+   store ("staging").
 4. build: gather the day stores into one cube whose chunks hold the whole
-   time series of 256 x 256 pixel blocks, the layout per-pixel time-series
-   methods read fastest.
+   time series of 2.56 x 2.56 km blocks, the layout per-pixel time-series
+   methods read fastest. 20 m bands are resampled to 10 m only when read
+   (`sylvigie.preprocess.indices`), which halves the cube on disk.
 
 Every step records its progress (manifest statuses, one store per finished
 day), so an interrupted run picks up where it stopped. The cloud mask is not
@@ -49,6 +52,7 @@ from sylvigie.preprocess.s2 import (
     deduplicate,
     harmonise,
     item_table,
+    native_resolution,
     valid_mask,
 )
 from sylvigie.raster import read_on_grid
@@ -69,7 +73,10 @@ LOAD_ATTEMPTS = 3
 LOAD_FIRST_WAIT_S = 10.0
 SCREEN_WORKERS = 4
 DOWNLOAD_WORKERS = 3
-BLOCK = 256  # rows per inner chunk of a day store; cube chunks are BLOCK x BLOCK
+BLOCK = 256  # 10 m pixels per chunk side (128 at 20 m: same ground footprint)
+FINE_M = 10
+# Stores written before bands were kept at native resolution are rebuilt.
+LAYOUT = "native-resolution-v1"
 _COMPRESSORS = [ZstdCodec(level=3)]
 
 # Manifest statuses
@@ -300,20 +307,37 @@ def screen(
 
 
 def load_item(item: pystac.Item, grid: Grid, bands: list[str], collection: str) -> dict:
-    """Digital numbers of one item on `grid`: {band: uint16, "SCL": uint8}.
+    """Digital numbers of one item at native resolution: {band: array, "SCL": ...}.
 
-    20 m bands are upsampled bilinearly; SCL, a class map, by nearest neighbour.
+    10 m bands are read on `grid`, 20 m bands and SCL on `grid.coarsen(2)`.
+    Both grids sit on the Sentinel-2 pixel lattice, so nothing is interpolated.
     """
-    ds = odc.stac.load(
-        [item],
-        bands=[*bands, "SCL"],
-        geobox=grid.to_geobox(),
-        groupby="id",
-        resampling={**dict.fromkeys(bands, "bilinear"), "SCL": "nearest"},
-        patch_url=planetary_computer.sign,
-        stac_cfg={collection: STAC_CFG},
-    )
-    return {name: ds[name].isel(time=0).values for name in [*bands, "SCL"]}
+    out = {}
+    for resolution, names in _by_resolution([*bands, "SCL"]).items():
+        target = grid if resolution == FINE_M else grid.coarsen(2)
+        ds = odc.stac.load(
+            [item],
+            bands=names,
+            geobox=target.to_geobox(),
+            groupby="id",
+            resampling="nearest",
+            patch_url=planetary_computer.sign,
+            stac_cfg={collection: STAC_CFG},
+        )
+        out |= {name: ds[name].isel(time=0).values for name in names}
+    return out
+
+
+def _by_resolution(names: list[str]) -> dict[int, list[str]]:
+    groups: dict[int, list[str]] = {}
+    for name in names:
+        groups.setdefault(native_resolution(name), []).append(name)
+    return groups
+
+
+def spatial_dims(name: str) -> tuple[str, str]:
+    """Dimension names of a variable: (y, x) at 10 m, (y20, x20) at 20 m."""
+    return ("y", "x") if native_resolution(name) == FINE_M else ("y20", "x20")
 
 
 def fuse(layers: list[np.ndarray], nodata: int) -> np.ndarray:
@@ -325,29 +349,43 @@ def fuse(layers: list[np.ndarray], nodata: int) -> np.ndarray:
     return out
 
 
-def day_dataset(
-    data: dict[str, np.ndarray], grid: Grid, when: pd.Timestamp
-) -> xr.Dataset:
-    """One day as a (time=1, y, x) dataset with pixel-centre coordinates and CRS."""
-    x0, y0 = grid.bounds[0], grid.bounds[3]
-    res = grid.resolution
-    coords = {
-        "time": [when],
+def _centres(grid: Grid) -> dict[str, np.ndarray]:
+    x0, y0, res = grid.bounds[0], grid.bounds[3], grid.resolution
+    return {
         "y": y0 - (np.arange(grid.height) + 0.5) * res,
         "x": x0 + (np.arange(grid.width) + 0.5) * res,
     }
+
+
+def day_dataset(
+    data: dict[str, np.ndarray], grid: Grid, when: pd.Timestamp
+) -> xr.Dataset:
+    """One day as a dataset with pixel-centre coordinates (10 m and 20 m) and CRS."""
+    fine, coarse = _centres(grid), _centres(grid.coarsen(2))
+    coords = {"time": [when], **fine, "y20": coarse["y"], "x20": coarse["x"]}
     ds = xr.Dataset(
-        {name: (("time", "y", "x"), array[None]) for name, array in data.items()},
+        {
+            name: (("time", *spatial_dims(name)), array[None])
+            for name, array in data.items()
+        },
         coords=coords,
     )
+    ds.attrs["layout"] = LAYOUT
     return ds.rio.write_crs(grid.crs)
 
 
-def _encoding(ds: xr.Dataset, chunks: dict[str, tuple[int, ...]]) -> dict:
+def _block(name: str) -> int:
+    # Same ground footprint at both resolutions: 256 px of 10 m = 128 px of 20 m.
+    return BLOCK if native_resolution(name) == FINE_M else BLOCK // 2
+
+
+def _encoding(ds: xr.Dataset, chunks: dict[str, dict]) -> dict:
     encoding = {}
     for name in ds.data_vars:
         fill = SCL_NODATA if name == "SCL" else NODATA
-        encoding[name] = {"_FillValue": fill, "compressors": _COMPRESSORS} | chunks
+        encoding[name] = {"_FillValue": fill, "compressors": _COMPRESSORS} | chunks[
+            name
+        ]
     return encoding
 
 
@@ -355,21 +393,36 @@ def write_day(ds: xr.Dataset, path: Path) -> Path:
     """Write a day store atomically: a half-written day never looks finished.
 
     One shard (file) per band holds the whole image, cut inside into strips
-    of BLOCK rows that the cube builder reads one at a time.
+    that the cube builder reads one at a time.
     """
-    height, width = ds.sizes["y"], ds.sizes["x"]
-    strip = min(BLOCK, height)
-    # A shard must hold whole inner chunks; the last shard may overhang the array.
-    shard_height = -(-height // strip) * strip
-    chunks = {"chunks": (1, strip, width), "shards": (1, shard_height, width)}
+    chunks = {}
+    for name in ds.data_vars:
+        ydim, xdim = spatial_dims(name)
+        height, width = ds.sizes[ydim], ds.sizes[xdim]
+        strip = min(_block(name), height)
+        # A shard must hold whole inner chunks; the last shard may overhang.
+        shard_height = -(-height // strip) * strip
+        chunks[name] = {"chunks": (1, strip, width), "shards": (1, shard_height, width)}
     tmp = path.with_name(path.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.parent.mkdir(parents=True, exist_ok=True)
     ds.to_zarr(
         tmp, mode="w", zarr_format=3, consolidated=False, encoding=_encoding(ds, chunks)
     )
+    # Windows cannot rename a folder onto an existing one: drop a stale store.
+    shutil.rmtree(path, ignore_errors=True)
     tmp.replace(path)
     return path
+
+
+def store_is_valid(path: Path) -> bool:
+    """A finished day store written with the current layout."""
+    if not path.exists():
+        return False
+    try:
+        return xr.open_zarr(path, consolidated=False).attrs.get("layout") == LAYOUT
+    except Exception:  # unreadable leftovers are rewritten
+        return False
 
 
 def download_day(
@@ -410,11 +463,12 @@ def download(
     items: dict[str, pystac.Item],
     load: Callable[[pystac.Item, Grid, list[str], str], dict] = load_item,
 ) -> pd.DataFrame:
-    """Download every kept day that has no store yet."""
+    """Download every kept day that has no valid store yet."""
     days = days.copy()
-    stored = days["day"].map(lambda d: paths.day_store(d).exists())
-    days.loc[(days["status"] == KEPT) & stored, "status"] = WRITTEN
-    days.loc[(days["status"] == WRITTEN) & ~stored, "status"] = KEPT
+    candidates = days["status"].isin([KEPT, WRITTEN])
+    stored = days["day"].map(lambda d: store_is_valid(paths.day_store(d))) & candidates
+    days.loc[candidates & stored, "status"] = WRITTEN
+    days.loc[candidates & ~stored, "status"] = KEPT
     todo = days.index[days["status"] == KEPT]
     log.info("Downloading %d days (%d already stored)", len(todo), int(stored.sum()))
 
@@ -436,10 +490,11 @@ def download(
 
 
 def build_cube(days: pd.DataFrame, paths: WindowPaths, attrs: dict[str, str]) -> Path:
-    """Gather the day stores into one cube chunked (time=all, BLOCK, BLOCK).
+    """Gather the day stores into one cube holding whole time series per block.
 
-    Done one band and one strip of BLOCK rows at a time, so memory stays at
-    about n_days x BLOCK x width values whatever the window size.
+    Chunks are (time=all, 256, 256) at 10 m and (time=all, 128, 128) at 20 m,
+    the same ground footprint. Built one band and one strip of rows at a time,
+    so memory stays at about n_days x strip x width values.
     """
     written = days[days["status"] == WRITTEN].sort_values("datetime")
     if written.empty:
@@ -463,11 +518,20 @@ def build_cube(days: pd.DataFrame, paths: WindowPaths, attrs: dict[str, str]) ->
         "clear_fraction": written["clear_fraction"].to_numpy(dtype=np.float32),
     }
     combined = combined.assign_coords({k: ("time", v) for k, v in per_day.items()})
-    combined.attrs = attrs
-    for name in combined.data_vars:  # the fill value goes in the encoding instead
-        combined[name].attrs.pop("_FillValue", None)
-    n_time, height, width = (combined.sizes[d] for d in ("time", "y", "x"))
-    chunks = {"chunks": (n_time, min(BLOCK, height), min(BLOCK, width))}
+    combined.attrs = attrs | {"layout": LAYOUT}
+    n_time = combined.sizes["time"]
+    chunks = {}
+    for name in combined.data_vars:
+        combined[name].attrs.pop("_FillValue", None)  # goes in the encoding instead
+        ydim, xdim = spatial_dims(name)
+        block = _block(name)
+        chunks[name] = {
+            "chunks": (
+                n_time,
+                min(block, combined.sizes[ydim]),
+                min(block, combined.sizes[xdim]),
+            )
+        }
 
     tmp = paths.cube.with_name(paths.cube.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
@@ -476,7 +540,9 @@ def build_cube(days: pd.DataFrame, paths: WindowPaths, attrs: dict[str, str]) ->
     # writes them now while the bands are filled strip by strip below.
     template = combined.copy()
     for name in combined.data_vars:
-        template[name] = combined[name].chunk({"time": -1, "y": BLOCK, "x": BLOCK})
+        ydim, xdim = spatial_dims(name)
+        block = _block(name)
+        template[name] = combined[name].chunk({"time": -1, ydim: block, xdim: block})
     template.to_zarr(
         tmp,
         mode="w",
@@ -486,14 +552,15 @@ def build_cube(days: pd.DataFrame, paths: WindowPaths, attrs: dict[str, str]) ->
         encoding=_encoding(combined, chunks),
     )
     for name in combined.data_vars:
-        for row in range(0, height, BLOCK):
-            rows = slice(row, min(row + BLOCK, height))
+        ydim, _ = spatial_dims(name)
+        block, height = _block(name), combined.sizes[ydim]
+        others = [c for c in combined.coords if ydim not in combined[c].dims]
+        for row in range(0, height, block):
+            rows = slice(row, min(row + block, height))
             strip = (
-                combined[[name]]
-                .isel(y=rows)
-                .drop_vars([c for c in combined.coords if "y" not in combined[c].dims])
+                combined[[name]].isel({ydim: rows}).drop_vars(others, errors="ignore")
             )
-            strip.load().to_zarr(tmp, region={"y": rows}, consolidated=False)
+            strip.load().to_zarr(tmp, region={ydim: rows}, consolidated=False)
         log.info("Cube: %s written", name)
     shutil.rmtree(paths.cube, ignore_errors=True)
     tmp.replace(paths.cube)
@@ -501,10 +568,12 @@ def build_cube(days: pd.DataFrame, paths: WindowPaths, attrs: dict[str, str]) ->
 
 
 def cube_is_current(days: pd.DataFrame, paths: WindowPaths) -> bool:
-    """True when the cube holds exactly the downloaded days."""
+    """True when the cube has the current layout and exactly the downloaded days."""
     if not paths.cube.exists():
         return False
     cube = xr.open_zarr(paths.cube, consolidated=False)
+    if cube.attrs.get("layout") != LAYOUT:
+        return False
     written = set(days.loc[days["status"] == WRITTEN, "day"].astype(str))
     return set(cube["solar_day"].values.astype(str)) == written
 
@@ -543,8 +612,8 @@ def build_s2_cube(
         "source": f"Microsoft Planetary Computer STAC, collection {cfg.s2.collection}",
         "reflectance": f"band value / {REFLECTANCE_SCALE}; nodata {NODATA}",
         "processing": "duplicates dropped (latest baseline); +1000 offset removed "
-        "for baseline >= 04.00; 20 m bands bilinear to 10 m; SCL nearest; "
-        "cloud mask not applied (use SCL)",
+        "for baseline >= 04.00; bands and SCL at native resolution (y, x = 10 m; "
+        "y20, x20 = 20 m); cloud mask not applied (use SCL)",
         "sylvigie_version": __version__,
         "created": dt.date.today().isoformat(),
     }

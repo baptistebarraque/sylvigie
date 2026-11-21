@@ -19,6 +19,28 @@ REFLECTANCE_SCALE = 10_000
 BOA_OFFSET = 1000
 OFFSET_SINCE_BASELINE = (4, 0)
 
+# Native pixel size of each Sentinel-2 L2A asset. The cube stores every band
+# at its native size (no interpolation on disk) and resamples to 10 m when read.
+NATIVE_RESOLUTION_M = {
+    "B02": 10,
+    "B03": 10,
+    "B04": 10,
+    "B08": 10,
+    "B05": 20,
+    "B06": 20,
+    "B07": 20,
+    "B8A": 20,
+    "B11": 20,
+    "B12": 20,
+    "SCL": 20,
+}
+
+
+def native_resolution(band: str) -> int:
+    if band not in NATIVE_RESOLUTION_M:
+        raise ValueError(f"{band}: only 10 m and 20 m Sentinel-2 bands are supported")
+    return NATIVE_RESOLUTION_M[band]
+
 
 def parse_baseline(baseline: str) -> tuple[int, int]:
     """'05.10' -> (5, 10); compares correctly, unlike the string ('5.9' > '05.10')."""

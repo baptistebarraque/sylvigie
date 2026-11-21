@@ -86,10 +86,12 @@ uv run sylvigie ingest --config configs/morvan.yaml                             
 3. Download the bands of kept days onto the window grid, remove the +1000
    offset of processing baselines >= 04.00 item by item, fuse tiles.
 4. Gather the days into `data/interim/<zone>/<window>/s2_cube.zarr`
-   (Zarr v3): int16 reflectance x 10 000 per band plus SCL, chunked to hold
-   the whole time series of 256 x 256 pixel blocks. The cloud mask is
-   applied when reading (`sylvigie.preprocess.indices`), so it can change
-   without downloading again.
+   (Zarr v3): int16 reflectance x 10 000 per band plus SCL, each at its
+   native resolution (`y, x` at 10 m for B04 and B08; `y20, x20` at 20 m for
+   B05, B8A, B11, B12 and SCL), chunked to hold the whole time series of
+   2.56 x 2.56 km blocks. 20 m bands are resampled to 10 m and the cloud mask
+   is applied when reading (`sylvigie.preprocess.indices`), which halves the
+   cube on disk and lets the mask change without downloading again.
 
 Plot index time series (NBR, NDVI, CRSWIR) of typical pixels picked from the
 step 2b layers: stable conifer, stable broadleaf, Douglas fir and fir/spruce

@@ -22,7 +22,7 @@ from sylvigie.ingest.sentinel2 import (
     fuse,
     ingest_grid,
 )
-from sylvigie.preprocess.s2 import NODATA
+from sylvigie.preprocess.s2 import NODATA, native_resolution
 
 CONFIG = Path(__file__).parents[1] / "configs" / "morvan.yaml"
 BANDS = ["B04", "B05", "B08", "B8A", "B11", "B12"]
@@ -55,8 +55,16 @@ def _fake_load(values):
 
     def load(item, grid, bands, collection):
         dn = values[item.id]
-        out = {band: np.full(grid.shape, dn, dtype=np.uint16) for band in bands}
-        out["SCL"] = np.full(grid.shape, 4 if dn else 0, dtype=np.uint8)
+        coarse = grid.coarsen(2).shape  # 20 m bands come at native resolution
+        out = {
+            band: np.full(
+                grid.shape if native_resolution(band) == 10 else coarse,
+                dn,
+                dtype=np.uint16,
+            )
+            for band in bands
+        }
+        out["SCL"] = np.full(coarse, 4 if dn else 0, dtype=np.uint8)
         return out
 
     return load
@@ -98,10 +106,14 @@ def test_download_day_removes_offset_per_item(cfg):
     assert int(ds2["B04"].max()) == 500  # baseline 05.10: -1000
     assert ds2["B04"].dtype == np.int16
     assert ds2.rio.crs.to_epsg() == 32631
-    assert ds2.sizes == {"time": 1, "y": 20, "x": 20}
-    # Pixel-centre coordinates of the grid.
+    assert ds2.sizes == {"time": 1, "y": 20, "x": 20, "y20": 10, "x20": 10}
+    assert ds2["B12"].dims == ("time", "y20", "x20")
+    assert ds2["SCL"].dims == ("time", "y20", "x20")
+    # Pixel-centre coordinates of both grids.
     assert float(ds2.x[0]) == grid.bounds[0] + 5
     assert float(ds2.y[0]) == grid.bounds[3] - 5
+    assert float(ds2.x20[0]) == grid.bounds[0] + 10
+    assert float(ds2.y20[0]) == grid.bounds[3] - 10
 
 
 def test_download_day_fuses_tiles_clearest_first(cfg):
@@ -196,9 +208,11 @@ def test_build_cube_holds_the_time_series_in_blocks(staged):
     build_cube(days, paths, {"title": "test"})
 
     cube = xr.open_zarr(paths.cube, consolidated=False)
-    assert cube.sizes == {"time": 3, "y": 20, "x": 20}
+    assert cube.sizes == {"time": 3, "y": 20, "x": 20, "y20": 10, "x20": 10}
     assert cube["B04"].encoding["chunks"] == (3, 8, 8)
+    assert cube["B12"].encoding["chunks"] == (3, 4, 4)  # same ground footprint
     assert cube["B04"].isel(y=19, x=19).values.tolist() == [100, 200, 300]
+    assert cube["B12"].isel(y20=9, x20=9).values.tolist() == [100, 200, 300]
     assert cube["solar_day"].values.tolist() == [
         "2023-06-01",
         "2023-06-06",
@@ -222,7 +236,23 @@ def test_build_cube_keeps_nodata_as_nan(staged):
     assert decoded["B04"].isel(time=0).isnull().all()
     raw = xr.open_zarr(paths.cube, consolidated=False, mask_and_scale=False)
     assert int(raw["B04"].isel(time=0, y=0, x=0)) == NODATA
-    assert int(raw["SCL"].isel(time=0, y=0, x=0)) == 0
+    assert int(raw["SCL"].isel(time=0, y20=0, x20=0)) == 0
+
+
+def test_stores_from_an_older_layout_are_downloaded_again(staged):
+    cfg, grid, paths, days, items = staged
+    days = download(
+        cfg, grid, days, paths, items, _fake_load(dict.fromkeys("abc", 1500))
+    )
+    old = xr.Dataset({"B04": (("y", "x"), np.zeros((2, 2), np.int16))})
+    store = paths.day_store(days.loc[0, "day"])
+    old.to_zarr(store, mode="w", zarr_format=3, consolidated=False)  # no layout attr
+
+    days = download(
+        cfg, grid, days, paths, items, _fake_load(dict.fromkeys("abc", 1500))
+    )
+
+    assert xr.open_zarr(store, consolidated=False).attrs["layout"] == sentinel2.LAYOUT
 
 
 def test_cube_is_not_current_when_a_day_is_missing(staged):

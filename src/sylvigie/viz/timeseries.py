@@ -19,7 +19,7 @@ from scipy import ndimage
 
 from sylvigie.forest import BEECH, DOUGLAS_FIR, FIR_SPRUCE, OAK, OTHER_BROADLEAF
 from sylvigie.labels import NO_CUT, days_to_year
-from sylvigie.preprocess.indices import compute_index
+from sylvigie.preprocess.indices import compute_index, crop
 from sylvigie.viz.maps import SURFACE, TEXT_PRIMARY, TEXT_SECONDARY
 
 SERIES_COLOR = "#2a78d6"  # categorical slot 1
@@ -111,11 +111,13 @@ def pixel_series(
     A small neighbourhood is loaded so the cloud-mask dilation sees the
     clouds next to the pixel.
     """
-    pad = dilation_px + 1
-    rows = slice(max(pixel.row - pad, 0), pixel.row + pad + 1)
-    cols = slice(max(pixel.col - pad, 0), pixel.col + pad + 1)
-    patch = cube.isel(y=rows, x=cols).load()
-    r, c = pixel.row - rows.start, pixel.col - cols.start
+    # Margin for the cloud-mask dilation and the 20 m -> 10 m interpolation.
+    pad = dilation_px + 4
+    rows = slice(pixel.row - pad, pixel.row + pad + 1)
+    cols = slice(pixel.col - pad, pixel.col + pad + 1)
+    patch, row0, col0 = crop(cube, rows, cols)
+    patch = patch.load()
+    r, c = pixel.row - row0, pixel.col - col0
     table = pd.DataFrame(
         {
             name: compute_index(patch, name, scl_valid, dilation_px)

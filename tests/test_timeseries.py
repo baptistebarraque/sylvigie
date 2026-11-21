@@ -56,20 +56,24 @@ def test_pick_pixels_skips_absent_situations():
 
 
 def _cube():
-    t = 4
-    shape = (t, 9, 9)
+    """10 m bands on (y, x), 20 m bands and SCL on (y20, x20), as in the real cube."""
+    t, n = 4, 10
+    fine, coarse = (t, n, n), (t, n // 2, n // 2)
     data = {
-        b: (("time", "y", "x"), np.full(shape, 2000, np.float32))
-        for b in ["B04", "B05", "B08", "B8A", "B11", "B12"]
+        "B04": (("time", "y", "x"), np.full(fine, 500, np.float32)),
+        "B08": (("time", "y", "x"), np.full(fine, 2000, np.float32)),
     }
-    data["B04"] = (("time", "y", "x"), np.full(shape, 500, np.float32))
-    scl = np.full(shape, 4, np.float32)
+    for band in ["B05", "B8A", "B11", "B12"]:
+        data[band] = (("time", "y20", "x20"), np.full(coarse, 2000, np.float32))
+    scl = np.full(coarse, 4, np.float32)
     scl[1] = 9  # second date fully cloudy
-    data["SCL"] = (("time", "y", "x"), scl)
+    data["SCL"] = (("time", "y20", "x20"), scl)
     coords = {
         "time": pd.date_range("2023-06-01", periods=t, freq="10D"),
-        "y": np.arange(9.0),
-        "x": np.arange(9.0),
+        "y": np.arange(float(n)),
+        "x": np.arange(float(n)),
+        "y20": np.arange(n / 2),
+        "x20": np.arange(n / 2),
     }
     return xr.Dataset(data, coords=coords)
 
